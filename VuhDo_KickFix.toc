@@ -1,0 +1,11 @@
+## Interface: 30300
+## Title: |cff3399ff[manacode]|r VuhDo KickFix
+## Title-ruRU: |cff3399ff[manacode]|r VuhDo KickFix |cff808080— фикс кика в бою|r
+## Notes: Fixes VuhDo 2.22 frames breaking when someone is kicked or leaves the group in combat
+## Notes-ruRU: Чинит VuhDo 2.22, когда панель ломается после кика или выхода игрока из группы в бою
+## Author: Dmitry
+## Version: 1.1
+## X-Date: 2026-10-07
+## Dependencies: VuhDo
+
+VuhDo_KickFix.lua
