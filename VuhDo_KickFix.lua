@@ -1,4 +1,4 @@
--- VuhDo KickFix 1.1
+-- VuhDo KickFix 1.2
 -- Fixes VuhDo 2.22 breaking when someone is kicked / leaves the group during combat.
 --
 -- Cause: during combat VuhDo's reload timer sets VUHDO_IS_RELOADING = true, runs the roster
@@ -9,12 +9,14 @@
 --
 -- What this patch does:
 --   1. runs the roster-refresh steps under pcall, so one error cannot leave VuhDo half-way;
---   2. marks vanished units as offline during combat instead of leaving frozen "ghost" bars;
+--   2. in combat shows the slot that vanished after renumbering as an empty "left" bar, so the
+--      player who moved up is not shown twice (see fixShiftedRoster);
 --   3. watchdog: if VUHDO_IS_RELOADING is stuck for >1s it is reset and a reload is queued.
 -- Errors that get caught are printed once to the chat frame (useful for bug reports).
 
 local pcall, pairs, type, GetTime = pcall, pairs, type, GetTime
-local UnitExists, InCombatLockdown = UnitExists, InCombatLockdown
+local UnitExists, UnitIsUnit, UnitName, UnitGUID = UnitExists, UnitIsUnit, UnitName, UnitGUID
+local InCombatLockdown = InCombatLockdown
 local seen = {}
 
 local function report(where, err)
@@ -37,25 +39,78 @@ local function safeWrap(name, after)
 	end
 end
 
--- Units that no longer exist: show them as offline instead of leaving a frozen bar.
-local function markVanishedUnits()
+local LEFT_NAME = GetLocale() == "ruRU" and "вышел" or "left"
+
+local function isGroupUnit(unit)
+	return unit ~= "focus" and unit ~= "target" and unit ~= "player" and unit ~= "pet"
+end
+
+-- When someone leaves, the game renumbers the group without gaps (raid1..raid4 instead of
+-- raid1..raid3, raid5). In combat VuhDo cannot rebind its buttons, so the last raidN no longer
+-- exists but keeps the old name, while the same player now also sits on raidN-1: a duplicate.
+-- Each button keeps showing whoever its raidN is now (that is who a click heals); the slot that
+-- vanished becomes an empty "left" bar. VuhDo re-sorts the panel after combat as usual.
+local function fixShiftedRoster()
 	local raid = _G.VUHDO_RAID
 	if type(raid) ~= "table" or not InCombatLockdown() then return end
+	local changed = false
 	for unit, info in pairs(raid) do
-		if unit ~= "focus" and unit ~= "target" and unit ~= "player" and unit ~= "pet"
-			and type(info) == "table" and info.connected ~= false and not UnitExists(unit) then
-			info.connected = false
-			info.range = false
-			if _G.VUHDO_updateBouquetsForEvent then
-				local ok, err = pcall(_G.VUHDO_updateBouquetsForEvent, unit, 19) -- VUHDO_UPDATE_DC
-				if not ok then report("markVanishedUnits", err) end
+		if type(info) == "table" and isGroupUnit(unit) then
+			if not UnitExists(unit) then
+				if not info.kickfixLeft then
+					info.kickfixLeft = true
+					info.name, info.fullName, info.className = LEFT_NAME, LEFT_NAME, ""
+					info.connected, info.range, info.afk, info.dead = false, false, false, false
+					info.aggro, info.charmed = false, false
+					changed = true
+					if _G.VUHDO_updateBouquetsForEvent then
+						local ok, err = pcall(_G.VUHDO_updateBouquetsForEvent, unit, 19) -- VUHDO_UPDATE_DC
+						if not ok then report("fixShiftedRoster", err) end
+					end
+				end
+			else
+				-- a new player took the slot: VuhDo already re-read it into the same table
+				info.kickfixLeft = nil
+				-- our own raidN moved onto a slot that still shows someone else; VuhDo skips it
+				if UnitIsUnit(unit, "player") and info.name ~= UnitName("player") and _G.VUHDO_setHealth then
+					local ok, err = pcall(_G.VUHDO_setHealth, unit, 1) -- VUHDO_UPDATE_ALL
+					if not ok then report("fixShiftedRoster", err) end
+					changed = true
+				end
 			end
 		end
+	end
+	if not changed then return end
+
+	-- name -> unit lookups (main tanks, heal comm) must not point at vanished or shifted slots
+	local names = _G.VUHDO_RAID_NAMES
+	if type(names) == "table" then
+		for name, unit in pairs(names) do
+			local info = raid[unit]
+			if not info or info.kickfixLeft or info.name ~= name
+				or (unit ~= "player" and UnitIsUnit(unit, "player")) then
+				names[name] = nil
+			end
+		end
+		for unit, info in pairs(raid) do
+			if type(info) == "table" and unit ~= "focus" and unit ~= "target" and not info.kickfixLeft
+				and info.name and not UnitIsUnit(unit, "player") and (names[info.name] == nil or not info.isPet) then
+				names[info.name] = unit
+			end
+		end
+		names[UnitName("player")] = "player"
+	end
+	local guids = _G.VUHDO_RAID_GUIDS
+	if type(guids) == "table" and UnitGUID("player") then
+		guids[UnitGUID("player")] = "player"
+	end
+	if type(_G.VUHDO_resetNameTextCache) == "function" then
+		_G.VUHDO_resetNameTextCache()
 	end
 end
 
 local function install()
-	safeWrap("VUHDO_refreshRaidMembers", markVanishedUnits)
+	safeWrap("VUHDO_refreshRaidMembers", fixShiftedRoster)
 	safeWrap("VUHDO_rebuildTargets")
 	safeWrap("VUHDO_updateAllRaidBars")
 	safeWrap("VUHDO_initAllEventBouquets")

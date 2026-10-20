@@ -4,8 +4,8 @@
 ## Notes: Fixes VuhDo 2.22 frames breaking when someone is kicked or leaves the group in combat
 ## Notes-ruRU: Чинит VuhDo 2.22, когда панель ломается после кика или выхода игрока из группы в бою
 ## Author: Dmitry
-## Version: 1.1
-## X-Date: 2026-10-07
+## Version: 1.2
+## X-Date: 2026-10-20
 ## Dependencies: VuhDo
 
 VuhDo_KickFix.lua
